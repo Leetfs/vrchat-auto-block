@@ -6,7 +6,6 @@
   "password": "你的VRChat密码",
   "poll_interval": 60,
   "max_retries": 3,
-  "log_level": "INFO",
   "_supported_2fa": "支持TOTP验证器(Google Authenticator等)和邮箱OTP验证",
   "_session_files": "session.json - 保存认证会话，friends_cache.json - 保存好友缓存"
 }

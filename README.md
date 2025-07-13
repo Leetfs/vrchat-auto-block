@@ -83,7 +83,6 @@ copy config.example.json config.json
 
 - `poll_interval`: 轮询间隔（秒），默认60秒
 - `max_retries`: API请求最大重试次数，默认3次
-- `log_level`: 日志级别，可选 DEBUG, INFO, WARNING, ERROR
 
 ## 文件说明
 

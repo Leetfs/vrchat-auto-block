@@ -17,13 +17,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class VRChatAutoBlock:
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str, max_retries: int = 3, poll_interval: int = 60):
         """
         初始化VRChat自动拉黑器
         
         Args:
             username: VRChat用户名
             password: VRChat密码
+            max_retries: 最大重试次数（用于API请求失败、认证失败等各种重试场景）
+            poll_interval: 轮询间隔（秒）
         """
         self.username = username
         self.password = password
@@ -41,9 +43,9 @@ class VRChatAutoBlock:
         self.friends_data: Dict[str, Dict] = {}
         
         # 配置
-        self.poll_interval = 60  # 轮询间隔（秒）
-        self.max_retries = 3     # 最大重试次数
-        
+        self.poll_interval = poll_interval  # 轮询间隔（秒）
+        self.max_retries = max_retries      # 最大重试次数（用于API请求失败、认证失败等各种重试场景）
+
         # 会话持久化文件
         self.session_file = 'session.json'
         
@@ -61,8 +63,6 @@ class VRChatAutoBlock:
             if self.load_session():
                 logger.info("使用保存的会话，跳过认证步骤")
                 return True
-            
-            logger.info("开始新的认证流程...")
             
             # 获取配置信息
             config_response = self.session.get(f"{self.base_url}/config")
@@ -136,7 +136,7 @@ class VRChatAutoBlock:
         """
         try:
             # 提示用户输入TOTP代码
-            print("\n需要进行两步验证(TOTP)")
+            logger.info("需要进行两步验证(TOTP)")
             totp_code = input("请输入验证器应用中的6位数字验证码: ").strip()
             
             if not totp_code or len(totp_code) != 6 or not totp_code.isdigit():
@@ -171,7 +171,7 @@ class VRChatAutoBlock:
         """
         try:
             # 发送邮箱OTP请求
-            print("\n需要进行邮箱两步验证")
+            logger.info("需要进行邮箱两步验证")
             email_response = self.session.post(
                 f"{self.base_url}/auth/twofactorauth/emailotp/send",
                 auth=(self.username, self.password)
@@ -220,7 +220,7 @@ class VRChatAutoBlock:
             all_friends = []
             offset = 0
             n = 100  # 每次请求的数量
-            max_attempts = 10  # 最大尝试次数，防止无限循环
+            max_attempts = self.max_retries * 3  # 获取好友列表允许更多重试，因为需要分页
             attempt = 0
             
             logger.info("开始获取好友列表...")
@@ -238,15 +238,14 @@ class VRChatAutoBlock:
                     logger.debug(f"本次获取到 {len(friends_batch)} 个好友")
                     
                     if not friends_batch:  # 如果返回空列表，说明已经获取完所有好友
-                        logger.info("返回空列表，已获取完所有好友")
+                        logger.debug("返回空列表，已获取完所有好友")
                         break
                     
                     all_friends.extend(friends_batch)
-                    logger.info(f"累计获取 {len(all_friends)} 个好友...")
                     
                     # 如果返回的好友数量少于请求的数量，说明已经是最后一批
                     if len(friends_batch) < n:
-                        logger.info(f"本次获取数量({len(friends_batch)})少于请求数量({n})，已是最后一批")
+                        logger.debug(f"本次获取数量({len(friends_batch)})少于请求数量({n})，已是最后一批")
                         break
                     
                     offset += n
@@ -324,7 +323,7 @@ class VRChatAutoBlock:
         new_friends: Set[str] = set()
         new_friends_data: Dict[str, Dict] = {}
         
-        logger.info(f"处理 {len(friends_list)} 个好友数据...")
+        logger.debug(f"处理 {len(friends_list)} 个好友数据...")
         
         for friend in friends_list:
             user_id = friend.get('id')
@@ -345,8 +344,8 @@ class VRChatAutoBlock:
                     'cached_at': datetime.now().isoformat()
                 }
         
-        logger.info(f"新好友列表包含 {len(new_friends)} 个用户")
-        logger.info(f"缓存中之前有 {len(self.friends_cache)} 个用户")
+        logger.debug(f"新好友列表包含 {len(new_friends)} 个用户")
+        logger.debug(f"缓存中之前有 {len(self.friends_cache)} 个用户")
         
         # 检测被删除的好友 - 只有在缓存不为空时才检测
         if self.friends_cache:  # 防止首次运行时误报
@@ -356,7 +355,7 @@ class VRChatAutoBlock:
                 logger.warning(f"检测到 {len(removed_friends)} 个用户可能删除了你")
                 
                 # 使用 isFriend API 进行二次验证
-                logger.info("使用 isFriend API 进行二次验证...")
+                logger.debug("使用 isFriend API 进行二次验证...")
                 confirmed_removed = set()
                 
                 for user_id in removed_friends:
@@ -396,11 +395,11 @@ class VRChatAutoBlock:
         if self.friends_cache:
             new_added_friends = new_friends - self.friends_cache
             if new_added_friends:
-                logger.info(f"检测到 {len(new_added_friends)} 个新好友")
+                logger.debug(f"检测到 {len(new_added_friends)} 个新好友")
                 for new_friend_id in new_added_friends:
                     friend_data = new_friends_data.get(new_friend_id, {})
                     display_name = friend_data.get('displayName', 'Unknown')
-                    logger.info(f"新好友: {display_name}")
+                    logger.debug(f"新好友: {display_name}")
         
         # 更新缓存
         self.friends_cache = new_friends
@@ -438,11 +437,11 @@ class VRChatAutoBlock:
             
             last_update = cache_data.get('last_update')
             if last_update:
-                logger.info(f"从缓存文件加载好友数据，上次更新时间: {last_update}")
-                logger.info(f"缓存中好友数量: {len(self.friends_cache)}")
+                logger.debug(f"从缓存文件加载好友数据，上次更新时间: {last_update}")
+                logger.debug(f"缓存中好友数量: {len(self.friends_cache)}")
             
         except FileNotFoundError:
-            logger.info("缓存文件不存在，将创建新的缓存")
+            logger.debug("缓存文件不存在，将创建新的缓存")
         except Exception as e:
             logger.error(f"加载缓存文件失败: {e}")
     
@@ -509,7 +508,7 @@ class VRChatAutoBlock:
         Returns:
             requests.Response: 响应对象
         """
-        max_auth_retries = 2
+        max_auth_retries = self.max_retries
         auth_retry_count = 0
         
         while auth_retry_count < max_auth_retries:
@@ -557,7 +556,6 @@ class VRChatAutoBlock:
         if not self.authenticate():
             logger.error("认证失败，运行诊断...")
             self.diagnose_auth_issues()
-            logger.error("程序退出")
             return
         
         # 加载缓存
@@ -571,7 +569,7 @@ class VRChatAutoBlock:
         logger.info(f"开始监控循环，轮询间隔: {self.poll_interval}秒")
         
         consecutive_failures = 0
-        max_consecutive_failures = 3
+        max_consecutive_failures = self.max_retries
         
         try:
             while True:
@@ -603,7 +601,7 @@ class VRChatAutoBlock:
                             logger.info("重新认证成功，继续监控")
                             consecutive_failures = 0
                         else:
-                            logger.error("重新认证失败，程序退出")
+                            logger.error("重新认证失败")
                             break
                 
         except KeyboardInterrupt:
@@ -790,18 +788,32 @@ class VRChatAutoBlock:
             return False
 
 def main():
+    """
+    主函数：处理配置加载、用户输入、创建并运行VRChat自动拉黑器
     
+    配置优先级：
+    1. 配置文件 (config.json) - 如果存在且包含有效的用户名密码
+    2. 用户交互输入 - 如果配置文件不存在或无效
+    
+    支持的配置项：
+    - username: VRChat用户名
+    - password: VRChat密码 
+    - poll_interval: 轮询间隔（秒），默认60
+    - max_retries: 最大重试次数，默认3（用于所有重试场景）
+    """
     try:
         # 检查是否使用配置文件
         config = VRChatAutoBlock.load_config_from_file()
         
         if config and config.get('username') and config.get('password'):
-            print("检测到配置文件，使用配置文件中的设置")
-            print(f"用户名: {config['username']}")
+            logger.info("检测到配置文件，使用配置文件中的设置")
+            logger.info(f"用户名: {config['username']}")
             username = config['username']
             password = config['password']
             poll_interval = config.get('poll_interval', 60)
-            print(f"将使用配置的轮询间隔: {poll_interval}秒")
+            max_retries = config.get('max_retries', 3)
+            logger.info(f"将使用配置的轮询间隔: {poll_interval}秒")
+            logger.info(f"将使用配置的最大重试次数: {max_retries}次")
             
             # 询问是否清除保存的会话
             clear_session = input("是否清除保存的会话？(y/N): ").strip().lower()
@@ -810,17 +822,17 @@ def main():
                 session_file = 'session.json'
                 if os.path.exists(session_file):
                     os.remove(session_file)
-                    print("已清除保存的会话，将重新进行认证")
+                    logger.info("已清除保存的会话，将重新进行认证")
                 else:
-                    print("没有找到保存的会话文件")
+                    logger.info("没有找到保存的会话文件")
         else:
-            print("📝 未检测到有效配置文件，请手动输入...")
+            logger.info("未检测到有效配置文件，请手动输入...")
             # 获取用户凭据
             username = input("请输入你的VRChat用户名: ").strip()
             password = input("请输入你的VRChat密码: ").strip()
             
             if not username or not password:
-                print("用户名和密码不能为空！")
+                logger.error("用户名和密码不能为空！")
                 return
             
             # 可选：设置轮询间隔
@@ -828,23 +840,29 @@ def main():
                 interval_input = input("请输入轮询间隔（秒，默认60）: ").strip()
                 poll_interval = int(interval_input) if interval_input else 60
             except ValueError:
-                print("轮询间隔必须是数字，使用默认值")
+                logger.warning("轮询间隔必须是数字，使用默认值")
                 poll_interval = 60
+            
+            try:
+                retries_input = input("请输入最大重试次数（默认3）: ").strip()
+                max_retries = int(retries_input) if retries_input else 3
+            except ValueError:
+                logger.warning("重试次数必须是数字，使用默认值")
+                max_retries = 3
         
         # 创建并运行自动拉黑
-        auto_blocker = VRChatAutoBlock(username, password)
-        auto_blocker.poll_interval = poll_interval
-        print(f"轮询间隔设置为: {auto_blocker.poll_interval}秒")
+        auto_blocker = VRChatAutoBlock(username, password, max_retries, poll_interval)
+        logger.info(f"轮询间隔设置为: {auto_blocker.poll_interval}秒")
+        logger.info(f"最大重试次数设置为: {auto_blocker.max_retries}次")
         auto_blocker.run()
         
     except KeyboardInterrupt:
-        print("\n程序被用户中断")
+        logger.info("程序被用户中断")
     except ImportError as e:
-        print(f"导入模块失败: {e}")
-        print("请确保已安装所需依赖：pip install requests")
+        logger.error(f"导入模块失败: {e}")
+        logger.error("请确保已安装所需依赖：pip install requests")
     except Exception as e:
-        print(f"程序启动失败: {e}")
-        logger.error(f"主函数异常: {e}")
+        logger.error(f"程序启动失败: {e}")
         import traceback
         traceback.print_exc()
 
@@ -853,7 +871,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ 脚本执行失败: {e}")
+        logger.error(f"脚本执行失败: {e}")
         import traceback
         traceback.print_exc()
-    print("📍 脚本执行完成")
+    logger.info("脚本执行完成")
