@@ -1,0 +1,11 @@
+{
+  "_comment": "VRChat 自动拉黑配置文件示例 - 复制此文件为 config.json 并填写你的信息",
+  "_note_2fa": "如果启用了2FA，程序会在运行时交互式要求输入验证码",
+  "_note_session": "程序会自动保存认证会话到 session.json，下次启动时可复用避免重复输入验证码",
+  "username": "你的VRChat用户名",
+  "password": "你的VRChat密码",
+  "poll_interval": 60,
+  "max_retries": 3,
+  "_supported_2fa": "支持TOTP验证器(Google Authenticator等)和邮箱OTP验证",
+  "_session_files": "session.json - 保存认证会话，friends_cache.json - 保存好友缓存"
+}
