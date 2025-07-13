@@ -579,7 +579,7 @@ class VRChatAutoBlock:
                 
                 # 检查好友列表
                 friends_list = self.get_friends_list()
-                if friends_list is not None and len(friends_list) >= 0:
+                if friends_list:
                     # 成功获取好友列表，重置失败计数
                     consecutive_failures = 0
                     
